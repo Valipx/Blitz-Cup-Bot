@@ -1,0 +1,211 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Codeforces Duel</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/css/bootstrap.min.css" rel="stylesheet">
+    <style>
+        body {
+            padding: 20px;
+            background-color: #f8f9fa;
+        }
+        .container {
+            max-width: 800px;
+            background-color: white;
+            padding: 30px;
+            border-radius: 10px;
+            box-shadow: 0 0 10px rgba(0,0,0,0.1);
+        }
+        .status-box {
+            margin-top: 20px;
+            padding: 20px;
+            border-radius: 5px;
+            background-color: #f8f9fa;
+        }
+        .hidden {
+            display: none;
+        }
+        .end-duel-btn {
+            background-color: #f44336;
+            margin-left: 10px;
+        }
+        .end-duel-btn:hover {
+            background-color: #d32f2f;
+        }
+        .winner-announcement {
+            margin-top: 15px;
+            padding: 15px;
+            background-color: #4CAF50;
+            color: white;
+            border-radius: 5px;
+            text-align: center;
+            font-size: 1.2em;
+            font-weight: bold;
+            animation: fadeIn 0.5s ease-out;
+        }
+        @keyframes fadeIn {
+            from {
+                opacity: 0;
+                transform: translateY(-10px);
+            }
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1 class="text-center mb-4">Codeforces Duel</h1>
+        
+        <form id="duelForm">
+            <div class="mb-3">
+                <label for="username1" class="form-label">First Username</label>
+                <input type="text" class="form-control" id="username1" required>
+            </div>
+            <div class="mb-3">
+                <label for="username2" class="form-label">Second Username</label>
+                <input type="text" class="form-control" id="username2" required>
+            </div>
+            <div class="mb-3">
+                <label for="rating" class="form-label">Problem Rating</label>
+                <input type="number" class="form-control" id="rating" required min="800" max="3500" step="100">
+            </div>
+            <button type="submit" class="btn btn-primary w-100">Start Duel</button>
+            <button type="button" id="endBtn" class="btn btn-danger w-100 end-duel-btn" style="display: none;">End Duel</button>
+        </form>
+
+        <div id="statusBox" class="status-box hidden">
+            <h3>Duel Status</h3>
+            <div id="statusContent"></div>
+            <div id="winnerAnnouncement" class="winner-announcement" style="display: none;"></div>
+        </div>
+    </div>
+
+    <script>
+        let currentDuelId = null;
+        let statusCheckInterval = null;
+        let lastStatus = null;
+
+        document.getElementById('duelForm').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            
+            const username1 = document.getElementById('username1').value;
+            const username2 = document.getElementById('username2').value;
+            const rating = document.getElementById('rating').value;
+
+            try {
+                const response = await fetch('/start_duel', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({ username1, username2, rating }),
+                });
+
+                const data = await response.json();
+                if (data.error) {
+                    alert(data.error);
+                    return;
+                }
+
+                currentDuelId = data.duel_id;
+                document.getElementById('statusBox').classList.remove('hidden');
+                document.getElementById('endBtn').style.display = 'inline-block';
+                startStatusCheck();
+            } catch (error) {
+                alert('Error starting duel: ' + error);
+            }
+        });
+
+        function startStatusCheck() {
+            if (statusCheckInterval) {
+                clearInterval(statusCheckInterval);
+            }
+
+            statusCheckInterval = setInterval(checkStatus, 5000);
+            checkStatus();
+        }
+
+        async function checkStatus() {
+            if (!currentDuelId) return;
+
+            try {
+                const response = await fetch(`/duel_status/${currentDuelId}`);
+                const data = await response.json();
+
+                if (data.error) {
+                    alert(data.error);
+                    clearInterval(statusCheckInterval);
+                    return;
+                }
+
+                let statusHtml = `
+                    <p><strong>Status:</strong> ${data.status}</p>
+                    <p><strong>Players:</strong> ${data.username1} vs ${data.username2}</p>
+                    <p><strong>Rating:</strong> ${data.rating}</p>
+                `;
+
+                if (data.problem) {
+                    statusHtml += `
+                        <p><strong>Problem:</strong> <a href="${data.problem.url}" target="_blank">${data.problem.id} - ${data.problem.name}</a></p>
+                    `;
+                }
+
+                if (data.start_time) {
+                    statusHtml += `<p><strong>Start Time:</strong> ${data.start_time}</p>`;
+                }
+
+                if (data.winner) {
+                    statusHtml += `
+                        <p><strong>Winner:</strong> ${data.winner}</p>
+                        <p><strong>End Time:</strong> ${data.end_time}</p>
+                        <p><strong>Time taken:</strong> ${data.time_taken}</p>
+                    `;
+                    clearInterval(statusCheckInterval);
+                    
+                    // Show winner announcement
+                    if (lastStatus !== 'completed') {
+                        const winnerAnnouncement = document.getElementById('winnerAnnouncement');
+                        winnerAnnouncement.textContent = `${data.winner} solved the problem in ${data.time_taken}!`;
+                        winnerAnnouncement.style.display = 'block';
+                    }
+                }
+
+                document.getElementById('statusContent').innerHTML = statusHtml;
+                lastStatus = data.status;
+
+                if (data.status === 'error') {
+                    clearInterval(statusCheckInterval);
+                }
+            } catch (error) {
+                console.error('Error checking status:', error);
+            }
+        }
+
+        document.getElementById('endBtn').addEventListener('click', async () => {
+            if (!currentDuelId) return;
+
+            try {
+                const response = await fetch(`/end_duel/${currentDuelId}`, {
+                    method: 'POST'
+                });
+
+                const data = await response.json();
+                if (data.status === 'success') {
+                    alert('Duel ended');
+                    clearInterval(statusCheckInterval);
+                    currentDuelId = null;
+                    document.getElementById('endBtn').style.display = 'none';
+                    document.getElementById('statusBox').classList.add('hidden');
+                    document.getElementById('winnerAnnouncement').style.display = 'none';
+                }
+            } catch (error) {
+                alert('Error ending duel: ' + error);
+            }
+        });
+    </script>
+</body>
+</html> 
